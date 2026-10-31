@@ -1,0 +1,2166 @@
+---
+title: "Estimating Mean Monthly Electricity Outage Duration: Comparative Study of Stratified Sampling and Simple Random Sampling Without Replacement in a Simulated Municipality"
+author: "Kelebogile Matloga 2554365"
+date: "October 31, 2026"
+output: 
+  pdf_document:
+    number_sections: true
+    latex_engine: pdflatex
+geometry: "margin=1in"
+fontsize: 11pt
+header-includes:
+  - \usepackage{float}
+bibliography: references.bib
+csl: apa.csl
+link-citations: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE)
+library(survey)
+library(dplyr)
+library(ggplot2)
+library(xtable)
+setwd("C:/Users/keleb/Desktop/2026 MS/Applied Sampling")
+```
+
+
+\section*{Abstract}
+\addcontentsline{toc}{section}{Abstract}
+
+This report documents the design, execution, and evaluation of a probability sample survey conducted on a finite target population of $N = 10\,000$ households to estimate the mean monthly duration of electrical grid outages (load shedding). Settlement classification serves as an auxiliary stratification variable, dividing the population into four distinct strata. Stratified Random Sampling Without Replacement (STRAT-WOR) with equal allocation is deployed as the primary design and benchmarked against Simple Random Sampling Without Replacement (SRSWOR). The report details theoretical sample size derivations, finite population generation using stratum specific Gamma distributions, inclusion probability mechanics, non-response adjustments, Horvitz--Thompson estimation, and a 1,000-repetition Monte Carlo simulation study to evaluate empirical bias, standard error, efficiency, and confidence interval coverage.
+
+\section*{Introduction}
+
+Reliable information on the duration of electricity interruptions is useful for understanding the burden that unreliable electricity supply places on households (@rasool2015systematic). Electricity interruptions can affect household activities, studying, food storage, small businesses and the use of essential household equipment (@sanstad2020case). The effects may not be distributed equally across residential areas, particularly where electricity infrastructure and settlement conditions differ as described too in the report (@meeks2025electricity). A household survey provides a structured way of estimating the average duration of electricity interruptions (Loadshedding) across a defined population (@faranda2007load).
+
+This report develops and evaluates a probability sample survey to estimate the mean monthly duration of electricity outages experienced by residential households in a hypothetical municipality in South Africa. The municipality is treated as a simulated study setting rather than a claim about a particular real municipality. A finite population of 10,000 households is constructed in R. Settlement type is used to divide the population into four strata, and households are selected using stratified random sampling without replacement. The results are compared with a simple random sample without replacement (SRSWOR) of approximately the same size.
+
+The report focuses on the practical steps involved in planning a survey, determining an appropriate sample size, selecting households, calculating sampling weights and making design-based estimates. Repeated sampling from the same fixed population is then used to assess the performance of the two sampling designs. The simulation makes it possible to compare the methods against a known finite-population value, which would not ordinarily be available in a real survey.
+
+
+# Section A: Survey Planning and Sampling Design
+
+## Survey objectives and research questions
+
+The main objective is to estimate the average number of hours of electricity outages experienced by residential households during a standard 30-day period in the study municipality.
+
+The study has four supporting objectives. First, it constructs a finite population of 10,000 households with different outage patterns across settlement types. Second, it determines a sample size that aims to estimate the population mean with a 95% confidence-interval half-width no greater than 5% of a planning value. Third, it applies stratified random sampling and uses SRSWOR as a benchmark. Finally, it evaluates the accuracy and precision of both designs through repeated sampling.
+
+The study questions are:
+
+1. What is the mean monthly electricity outage duration among the 10,000 households in the simulated finite population?
+2. Does stratified random sampling estimate the population mean more precisely than SRSWOR when settlement type is used as the stratification variable?
+3. Do the two designs produce approximately unbiased estimates and confidence intervals with coverage close to the nominal 95% level over repeated samples?
+
+## Primary population parameter
+
+The primary parameter is the finite-population mean monthly outage duration per household. It is defined as
+
+\[
+\bar{Y}=\frac{1}{N}\sum_{i=1}^{N}Y_i,
+\tag{1}
+\]
+
+where:
+
+- \(\bar{Y}\) is the true finite-population mean monthly outage duration, measured in hours;
+- \(N\) is the number of households in the target population, with \(N=10\,000\);
+- \(Y_i\) is the total number of outage hours experienced by household \(i\) during the 30-day reference period; and
+- \(i\) identifies a household in the finite population.
+
+The mean is selected because it gives a single measure of the average monthly outage burden across households. It is also straightforward to interpret and compare across sampling designs (@hendricks1948mathematics).
+
+## Target population and study setting
+
+The target population consists of 10,000 residential households located within the boundary of a hypothetical municipality during the survey reference period. The municipality is not intended to represent a named local authority. It provides a clearly defined setting in which the sampling methods can be demonstrated using a simulated population.
+
+Each household is classified into one of four settlement types: Urban suburbs, townships, rural villages and informal settlements. The four groups are mutually exclusive, meaning that each household belongs to one and only one stratum. They are also collectively exhaustive, meaning that every household in the target population is assigned to one of the four strata.
+
+To keep a simple and transparent population structure, each stratum contains 2,500 households. These equal population sizes are a modelling choice for this simulation. They are not presented as actual municipal population proportions.
+
+```{r population-structure, results='asis'}
+
+strata_info <- data.frame(
+  Stratum = 1:4,
+  "Settlement type" = c(
+    "Urban suburbs", "Townships",
+    "Rural villages", "Informal settlements"
+  ),
+  "Population size Nh" = rep(2500L, 4)
+)
+
+print(
+  xtable(
+    strata_info,
+    caption = "Finite-population structure by settlement type.",
+    label = "tab:pop_struct",
+    align = c("l", "c", "p{4.5cm}", "r")
+  ),
+  type = "latex",
+  comment = FALSE,
+  caption.placement = "bottom",
+  booktabs = TRUE,
+  include.rownames = FALSE,
+  table.placement = "!ht"
+)
+```
+
+## Target population, sampled population, units and sampling frame 
+
+The target population consists of the 10,000 residential households within the municipality. Sampled population comprises the households included in the simulated sampling frame, which is assumed to cover the entire target population. The sampling unit is an individual residential household selected from the frame, while the observation unit is also the household, since monthly electricity outage duration is measured at household level and in reality usually reported by a designated adult resident. The sampling frame is a simulated register of 10,000 households, each with a unique identifier, settlement classification and relevant auxiliary characteristics. It is assumed to be complete and up to date, ensuring alignment between the target and sampled populations.
+
+## A.5 Population outcome and simulation assumptions
+
+The outcome variable is the number of hours of electricity outages experienced by a household during a 30-day period. Outage duration is non-negative and continuous. A Gamma distribution is used to generate the outcome because it is defined on positive values and can represent right-skewed measurements. This is a modelling choice, not a claim that real household outage durations must follow an exact Gamma distribution. The population is generated separately within each settlement stratum. Different stratum means and standard deviations are specified to represent differences in expected outage exposure and variability. The values below are planning assumptions selected to create a population with meaningful variation between settlement types. They are not estimates from an actual municipality.
+
+| Settlement type | Planning mean (hours) | Planning standard deviation (hours) |
+|:--|--:|--:|
+| Urban suburbs | 18 | 8 | 
+| Townships | 30 | 12 | 
+| Rural villages | 26 | 11 | 
+| Informal settlements | 14 | 7 | 
+
+A Gamma distribution parameterised by shape \(a_h\) and scale \(b_h\), the mean and variance are \(a_h/b_h\) and \(a_h/b_h^2\), respectively. The parameters are therefore obtained from a specified mean \(\mu_h\) and standard deviation \(\sigma_h\) 
+
+\[ 
+a_h=\frac{\mu_h^2}{\sigma_h^2},
+ \qquad 
+b_h=\frac{\sigma_h^2}{\mu_h}, 
+ \tag{2} 
+ \] 
+
+where \(a_h\) is the shape parameter, \(b_h\) is the scale parameter, \(\mu_h\) is the assumed stratum mean and \(\sigma_h\) is the assumed stratum standard deviation.The overall baseline planning mean becomes $\bar{Y}_0 = \frac{1}{N} \sum_{h=1}^4 N_h \mu_h = 22$ hours across the four equally sized strata. This value is used only as prior planning information for the sample size calculation. It is not treated as the true finite population mean. The true mean is calculated directly from the 10,000 generated household outcomes after the population has been created.
+
+## Selection and justification of the sampling design
+
+Stratification is appropriate because settlement type is expected to be related to household outage exposure. Dividing the population into groups before selection ensures that every settlement type is represented. It also allows the sample to reflect differences between settlement types rather than relying on the chance representation of each group in a single unstratified sample. Standard survey sampling texts describe stratification as particularly useful when the auxiliary grouping variable is associated with the outcome and when units within groups are more alike than units across groups (@imbens1996efficient)
+
+Equal allocation is used in the main design, the same number of households is selected from each of the four strata. Since the simulated strata have equal population sizes, equal allocation also gives equal sampling fractions across strata. This choice keeps the selection procedure and weighting calculations straightforward. It is not necessarily the allocation that minimises variance. Neyman allocation can be more efficient when stratum standard deviations differ, but it requires allocating more observations to strata with larger standard deviations. Equal allocation is retained here to make the design easier to explain and reproduce. SRSWOR is used as the benchmark because it selects households directly from the full population without first dividing the population into strata. Comparing the two designs shows whether using settlement type in the sample design improves precision for this particular population.
+
+## Sample selection and data collection 
+
+The sampling frame is assigned a unique identifier for every household. The frame is then divided by settlement type. Within each stratum, using R to select the required number of distinct household identifiers using random sampling without replacement.In real-world data collection procedure would use a 30-day reference period. A trained interviewer would contact an adult household member and record the total number of outage hours experienced by the household during that period. In the simulation, an anticipated non-response rate of 10% is allowed for when determining the gross sample size. The gross sample is increased so that the expected number of completed interviews is approximately the required net sample size. A response indicator is simulated for the selected households. Respondents receive a within stratum non-response adjusted weight, calculated by dividing the stratum population size by the number of responding sampled households in that stratum. This adjustment assumes that, within each stratum, response is not related to the outage outcome after conditioning on the design. This assumption is a simplification and would need to be examined in a real survey.
+
+## Possible sources of non-sampling error
+
+Sampling error arises because information is collected from a sample rather than every household, while non-sampling errors may occur even when the sampling design is correctly implemented.
+Coverage error may occur if a real sampling frame omits households, contains duplicate records or includes unoccupied addresses. Such omissions can prevent some households from being selected and introduce bias. An updated, verified sampling frame would help reduce this risk. In this simulation, the frame is assumed to cover all 10,000 households. 
+Measurement error may arise when respondents cannot accurately recall outage durations over the previous 30 days or interpret the questions differently. Clearly defining an outage, using a fixed recall period and consulting household records where available can help minimise this error.
+Non-response error occurs when selected households are unavailable or unwilling to participate. If non-responding households experience different outage durations from respondents, adjusting the weights may not eliminate the resulting bias. The simulation incorporates a 10% response loss and assumes that non-response occurs randomly within each stratum.
+
+# Section B: Sample-Size Determination and Sensitivity Analysis 
+
+## Precision requirement 
+
+The sample size is determined for estimation of the finite-population mean. A 95% confidence level is used, giving the standard normal critical value \(z_{0.975}=1.96\). The required confidence-interval half-width is set to 5% of the planning mean. 
+
+Let \(\bar{Y}_0=22\) hours denote the planning mean. The target half-width is 
+
+\[ 
+d=0.05\bar{Y}_0=0.05(22)=1.10\text{ hours}. 
+\tag{3} 
+\] 
+
+Here, \(d\) is the maximum desired distance between the estimated mean and either endpoint of the confidence interval. It is not a standard deviation.
+
+## Variance of the stratified estimator 
+
+Let \(H\) be the number of strata, \(N_h\) the population size of stratum \(h\), \(n_h\) the sample size in stratum \(h\), and \(S_h^2\) the finite-population variance of the outcome in stratum \(h\). The stratum population weight is \(W_h=N_h/N\). The design variance of the stratified sample mean under independent SRSWOR within each stratum is
+
+\[ 
+V(\bar{y}_{st})= 
+\sum_{h=1}^{H} 
+W_h^2 
+\left(1-\frac{n_h}{N_h}\right) 
+\frac{S_h^2}{n_h}. 
+\tag{4} 
+\] 
+
+n this expression, \(\bar{y}_{st}\) is the stratified estimator of the population mean, \(V(\bar{y}_{st})\) is its design variance, and the factor \(1-n_h/N_h\) is the finite population correction (FPC). The FPC reduces the variance to account for sampling without replacement from a finite population. The variance formula assumes that selection is carried out independently within the strata. Under equal allocation, \(n_h=n/H\), subject to integer rounding. The sample size is selected by finding the smallest feasible total sample size for which 
+
+\[ 
+1.96\sqrt{V(\bar{y}_{st})}\leq d. 
+\tag{5} 
+\] 
+
+The calculation uses the planning standard deviations in Section A.5. The finite population sizes are fixed at 2,500 per stratum. No additional cluster design effect is applied because households are sampled directly within strata rather than through sampled clusters. The 10% non-response allowance is applied after determining the required net sample size.
+
+
+
+## Sample-size calculation and non-response adjustment
+
+The calculation is implemented in R by evaluating Equation (4) over feasible sample sizes. The smallest total sample size, in multiples of four to preserve equal allocation, that satisfies Equation (5) is selected. The gross sample size is then calculated as
+
+\[ 
+n_{\mathrm{gross}}= 
+\left\lceil\frac{n_{\mathrm{net}}}{1-r}\right\rceil, 
+\tag{6} 
+\] 
+
+where \(n_{\mathrm{net}}\) is the required number of completed responses, \(r=0.10\) is the anticipated non-response proportion, and \(n_{\mathrm{gross}}\) is the number of households initially selected. The gross size is rounded up to a multiple of four so that equal allocation can be maintained. 
+
+\newpage
+
+```{r sample-size-calculation, results='asis'}
+
+N_h <- rep(2500,4) 
+mu_h <- c(18, 30, 26, 14) 
+sd_h <- c(8, 12, 11, 7) 
+H <- length(N_h) 
+N <- sum(N_h) 
+W_h <- N_h / N 
+planning_mean <- sum(W_h * mu_h) 
+confidence_level <- 0.95 
+z_value <- qnorm(1 - (1 - confidence_level) / 2) 
+relative_precision <- 0.05 
+target_half_width <- relative_precision * planning_mean 
+nonresponse_rate <- 0.10 
+
+stratified_variance <- function(n_total, N_h, sd_h) { 
+   H <- length(N_h) 
+   if (n_total %% H != 0) return(Inf) 
+   n_h <- rep(n_total / H, H) 
+   if (any(n_h <= 0) || any(n_h > N_h)) return(Inf) 
+   W_h <- N_h / sum(N_h) 
+   sum(W_h^2 * (1 - n_h / N_h) * sd_h^2 / n_h) 
+} 
+
+candidate_n <- seq(H, min(N_h) * H, by = H) 
+candidate_half_width <- vapply( 
+   candidate_n, 
+   function(n) z_value * sqrt(stratified_variance(n, N_h, sd_h)), 
+   numeric(1) 
+) 
+net_n <- candidate_n[which(candidate_half_width <= target_half_width)[1]] 
+n_h_net <- rep(net_n / H, H) 
+
+gross_n_raw <- ceiling(net_n / (1 - nonresponse_rate)) 
+gross_n <- ceiling(gross_n_raw / H) * H 
+n_h_gross <- rep(gross_n / H, H) 
+
+sample_size_summary <- data.frame( 
+   Quantity = c( 
+    "Planning mean (hours)", "Target half-width (hours)", 
+      "Required net sample size", "Net sample per stratum", 
+      "Anticipated non-response rate", "Gross sample size", 
+      "Gross sample per stratum" 
+   ), 
+   Value = c( 
+      planning_mean, target_half_width, net_n, net_n / H, 
+      nonresponse_rate, gross_n, gross_n / H 
+   ) 
+) 
+
+print(
+  xtable(
+    sample_size_summary,
+    caption = "Sample-size calculation using the planning assumptions.",
+    label = "tab:sample_size",
+    digits = 2,
+    align = c("l", "p{6.5cm}", "r")
+  ),
+  type = "latex",
+  comment = FALSE,
+  caption.placement = "bottom",
+  booktabs = TRUE,
+  include.rownames = FALSE,
+  table.placement = "!ht"
+)
+```
+
+The calculation above provides the required net sample size and the gross number of households to select after allowing for non-response. The final sample size is determined by the stated precision requirement rather than being chosen arbitrarily and the results summaried in Table 3. A smaller margin of error requires a larger sample to achieve the desired level of precision, while a less stringent precision requirement allows for a smaller sample. Figure 1 illustrates this relationship which shows that the sample size decreases as the required margin of error increases.
+
+
+
+```{r precision-sample-size-plot, fig.cap="Relationship between relative precision and the required net sample size.", fig.width=5.5, fig.height=3, out.width="80%", fig.align="center", fig.pos="!ht"}
+
+# Create a continuous range of relative precision values
+precision_grid <- seq(0.00, 0.10, length.out = 200)
+
+# Calculate the required net sample size for each precision level
+required_net_n <- vapply(precision_grid, function(p) {
+
+  target_width <- p * planning_mean
+
+  eligible_n <- candidate_n[
+    candidate_half_width <= target_width
+  ]
+
+  if (length(eligible_n) == 0) {
+    return(NA_real_)
+  }
+
+  min(eligible_n)
+
+}, numeric(1))
+
+# Prepare plotting data
+precision_plot_data <- data.frame(
+  Relative_Precision = precision_grid * 100,
+  Required_Sample_Size = required_net_n
+)
+
+# Plot the relationship
+ggplot(
+  precision_plot_data,
+  aes(x = Relative_Precision, y = Required_Sample_Size)
+) +
+  geom_line(linewidth = 0.8) +
+  geom_vline(
+    xintercept = relative_precision * 100,
+    colour = "red",
+    linetype = "dashed",
+    linewidth = 0.8
+  ) +
+  labs(
+    x = "Relative precision (%)",
+    y = "Required net sample size"
+  ) +
+  scale_x_continuous(
+    breaks = seq(1, 10, by = 1)
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    axis.title = element_text(face = "bold", size = 11),
+    axis.text = element_text(face = "bold", size = 10),
+    panel.grid.minor = element_blank(),
+    plot.margin = margin(2, 4, 2, 4)
+  )
+```
+
+
+## Sensitivity analysis for the assumed mean
+
+The required sample size depends on the assumed population variability and the precision requirement. To examine the effect of the planning mean, the sample size calculation is repeated for assumed means equal to 25%, 50%, 75% and 100% of the baseline planning mean. In this sensitivity analysis, the stratum population sizes, stratum standard deviations, equal allocation rule, confidence level and FPC are held fixed. The target half-width in each scenario is 5% of that scenario's assumed mean. Holding the standard deviations fixed means that the absolute variability is assumed not to change when the planning mean changes. This isolates the effect of changing the precision target. It is a sensitivity assumption rather than a claim that the coefficient of variation would remain unchanged in a real population. The required sample size is calculated over a range of relative half-widths for each assumed mean.
+
+
+```{r sensitivity-analysis, fig.cap="Required net sample size against relative confidence-interval half-width under four assumed planning means.", fig.width=5.5, fig.height=3.2, out.width="80%", fig.align="center", fig.pos="!ht"}
+
+planning_mean <- 22
+
+mean_fractions <- c(0.25, 0.50, 0.75, 1.00)
+relative_margins <- seq(0.02, 0.10, by = 0.005)
+
+sensitivity_data <- expand.grid(
+  fraction = mean_fractions,
+  relative_margin = relative_margins
+) %>%
+  mutate(
+    assumed_mean = fraction * planning_mean,
+    target_d = relative_margin * assumed_mean
+  )
+
+sensitivity_data$required_n <- vapply(
+  seq_len(nrow(sensitivity_data)),
+  function(j) {
+
+    d <- sensitivity_data$target_d[j]
+
+    ok <- candidate_n[
+      vapply(
+        candidate_n,
+        function(n) {
+          z_value * sqrt(
+            stratified_variance(n, N_h, sd_h)
+          ) <= d
+        },
+        logical(1)
+      )
+    ]
+
+    if (length(ok) == 0) NA_real_ else min(ok)
+  },
+  numeric(1)
+)
+
+sensitivity_data$scenario <- factor(
+  paste0(sensitivity_data$fraction * 100, "% of baseline"),
+  levels = paste0(mean_fractions * 100, "% of baseline")
+)
+
+ggplot(
+  sensitivity_data,
+  aes(
+    x = relative_margin * 100,
+    y = required_n,
+    colour = scenario
+  )
+) +
+  geom_line(linewidth = 0.9, na.rm = TRUE) +
+  geom_point(size = 1.3, na.rm = TRUE) +
+  labs(
+    x = "Confidence-interval half-width (% of assumed mean)",
+    y = "Required net sample size",
+    colour = "Assumed mean"
+  ) +
+  scale_x_continuous(
+    breaks = seq(2, 10, by = 1)
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    axis.title = element_text(face = "bold", size = 11),
+    axis.text = element_text(face = "bold", size = 10),
+    legend.title = element_text(face = "bold", size = 10),
+    legend.text = element_text(size = 9),
+    legend.position = "bottom",
+    panel.grid.minor = element_blank(),
+    plot.margin = margin(2, 4, 2, 4)
+  )
+```
+
+The curves should be interpreted in light of the fixed-variance assumption. A smaller assumed mean produces a smaller absolute half-width when the target remains 5% of that mean. Since the assumed standard deviations are held fixed, a smaller absolute target requires a larger sample. If the standard deviations were instead scaled in direct proportion to the mean, the relative precision requirement could lead to similar sample sizes across the scenarios.The main sample-size calculation uses the 100% baseline scenario (purple curve) which give sample size in line with what has already been established from Section B.3. The other curves show how sensitive the required sample size is to the planning value under the stated assumptions.
+
+## Proportion-specific sensitivity analysis
+
+The primary parameter in this project is a mean, not a proportion. Therefore, the proportion-specific sample-size calculation is not part of the main design. For completeness, the reason that proportion estimates are most variable near \(P=0.50\) is noted here. For a binary outcome, the variance is \(P(1-P)\), which is largest at \(P=0.50\). Values closer to zero or one produce smaller variance. This result is relevant when planning surveys whose main parameter is a population proportion, but it is not used to determine the sample size for the outage duration mean in this project.
+
+## Implications for the selected design
+
+The sample size calculation accounts for the stratified design directly through the variance in Equation (4), including the FPC within each stratum. The use of equal allocation makes the sample sizes identical across the four equally sized strata. If the population stratum sizes or standard deviations were substantially different, an alternative allocation, such as proportional or Neyman allocation, could be more efficient. The present design prioritises simplicity and representation of all four settlement types.
+
+
+# Section C: Finite-Population Generation and Sample Selection
+
+## Construction of the finite population 
+
+A fixed finite population of 10,000 households is generated in R. The population is generated once and then held constant for the realised sample analysis and all repeated sampling simulations. The household outcome is generated from the stratum specific Gamma distributions described in Section A. The population also contains a household identifier, settlement type, stratum number, grid-zone identifier, household size and an indicator of whether a backup electricity source is available. These variables provide additional information about the simulated households. The primary outcome remains monthly outage duration in hours. 
+
+```{r generate-population}
+set.seed(2554365)
+
+
+# Number of strata 
+ H <- 4 
+
+ # Population sizes for each stratum 
+ N_h <- c(2500, 2500, 2500, 2500) 
+
+ # Settlement types 
+ strata_info <- data.frame( 
+   stratum = 1:4, 
+   settlement_type = c( 
+     "Urban suburbs", 
+     "Townships", 
+     "Rural villages", 
+     "Informal settlements" 
+   ), 
+   Nh = N_h 
+ ) 
+
+ # Mean monthly outage hours for each stratum 
+ mu_h <- c(16, 32, 25, 12) 
+
+ # Standard deviations for each stratum 
+ sd_h <- c(sqrt(32), sqrt(80), sqrt(69.4), sqrt(24)) 
+
+ population <- bind_rows(lapply(seq_len(H), function(h) { 
+   shape_h <- mu_h[h]^2 / sd_h[h]^2 
+   scale_h <- sd_h[h]^2 / mu_h[h] 
+   Nh <- N_h[h] 
+
+   data.frame( 
+     household_id = sprintf("HH%05d", sum(N_h[seq_len(h - 1)]) + seq_len(Nh)), 
+     stratum = h, 
+     settlement_type = strata_info$settlement_type[h], 
+     grid_zone = paste0("Z", h, "_", sample(1:25, Nh, replace = TRUE)), 
+     household_size = pmax(1L, rpois(Nh, lambda = 3) + 1L), 
+     backup_power = rbinom( 
+       Nh, size = 1, 
+       prob = c(0.45, 0.20, 0.12, 0.08)[h] 
+       ), 
+     outage_hours = rgamma(Nh, shape = shape_h, scale = scale_h) 
+   ) 
+ })) 
+
+ stopifnot( 
+   nrow(population) == 10000, 
+   !anyDuplicated(population$household_id), 
+   all(population$outage_hours >= 0), 
+   all(table(population$stratum) == 2500) 
+ ) 
+
+ true_mean <- mean(population$outage_hours) 
+ true_total <- sum(population$outage_hours) 
+
+ population_summary <- population %>% 
+   group_by(stratum, settlement_type) %>% 
+   summarise( 
+     Nh = n(), 
+     finite_mean = mean(outage_hours), 
+     finite_sd = sd(outage_hours), 
+     finite_variance = var(outage_hours), 
+     .groups = "drop" 
+   ) 
+
+ knitr::kable( 
+   population_summary, digits = 3, 
+   caption = "Generated finite-population characteristics by stratum." 
+ ) 
+
+ cat( 
+   "True finite-population mean:", round(true_mean, 3), "hours\n\n", 
+   "True finite-population total:", round(true_total, 2), "household-hours\n" 
+ ) 
+
+ write.csv(population, "population.csv", row.names = FALSE) 
+``` 
+
+The finite population mean printed above is the true value for this simulated population. It is calculated only after the 10,000 outcomes have been generated. The finite-population stratum means and variances may differ slightly from the planning values because the population is generated randomly. 
+
+## Final sample size and allocation 
+
+The net sample size is the smallest value satisfying the precision condition in Section B. The gross sample size includes the 10% non-response allowance. Equal allocation is used, so the gross sample is divided equally across the four strata. Final numbers are produced automatically by the R code in Section B. They should be reported using the values in the generated sample-size table. The realised number of respondents is also reported after the response indicator has been generated.
+
+## Inclusion probabilities and sampling weights
+
+Under stratified SRSWOR, each household in stratum \(h\) has the same first-order inclusion probability: 
+
+ \[ 
+ \pi_{hi}=\frac{n_h^{(g)}}{N_h}, 
+ \tag{7} 
+ \] 
+
+where \(\pi_{hi}\) is the probability that household \(i\) in stratum \(h\) is selected, \(n_h^{(g)}\) is the gross number selected from stratum \(h\), and \(N_h\) is the population size of that stratum. The base sampling weight is the inverse of the inclusion probability: 
+
+ \[ 
+ w_{hi}^{(base)}=\frac{1}{\pi_{hi}}=\frac{N_h}{n_h^{(g)}}.
+ \tag{8} 
+ \] 
+
+For respondents, a non-response adjustment is applied within each stratum: 
+
+ \[ 
+ w_{hi}^{(final)}=
+ \frac{N_h}{m_h},
+ \tag{9}
+ \] 
+
+where \(m_h\) is the number of responding sampled households in stratum \(h\). This adjustment makes the respondent weights within each stratum sum to the stratum population size. It relies on the assumption that response is random within each stratum. All eligible households have a positive probability of selection under the sampling design. 
+
+## Drawing and saving the realised sample 
+
+The gross sample is selected independently within each stratum without replacement. A response indicator is then generated for each selected household, with a response probability of 0.90. The sample file retains both respondents and non-respondents, including each selected household's identifier, stratum, inclusion probability, base weight, response status and auxiliary variables. The outcome is retained for respondents and set to missing for non-respondents to represent the information available to the survey. 
+
+```{r draw-realised-sample} 
+set.seed(2554365) 
+
+ selected_sample <- population %>% 
+  group_by(stratum) %>% 
+   slice_sample(n = gross_n / H, replace = FALSE) %>% 
+   ungroup() %>% 
+   group_by(stratum) %>% 
+   mutate( 
+     Nh = nrow(population) / H, 
+     nh_gross = n(), 
+     inclusion_probability = nh_gross / Nh, 
+     base_weight = 1 / inclusion_probability, 
+     respondent = rbinom(n(), size = 1, prob = 1 - nonresponse_rate) 
+   ) %>% 
+   ungroup() 
+
+ response_counts <- selected_sample %>% 
+   group_by(stratum, settlement_type) %>% 
+  summarise( 
+     gross_selected = n(), 
+     respondents = sum(respondent), 
+     response_rate = mean(respondent), 
+     .groups = "drop" 
+   ) 
+
+ selected_sample <- selected_sample %>% 
+   group_by(stratum) %>% 
+     mutate( 
+         responding_n = sum(respondent), 
+     final_weight = ifelse( 
+       respondent == 1, 
+       (nrow(population) / H) / responding_n, 
+       NA_real_ 
+     ), 
+     outage_hours_observed = ifelse( 
+       respondent == 1, outage_hours, NA_real_ 
+     ) 
+   ) %>% 
+   ungroup() 
+
+ knitr::kable( 
+   response_counts, digits = 3, 
+   caption = "Gross sample and realised response by stratum." 
+ ) 
+
+ write.csv(selected_sample, "sample.csv", row.names = FALSE) 
+```
+
+The population file contains all 10,000 households whereas the sample file contains all selected households, including non-respondents, so the selection and response processes can be inspected separately. 
+
+# Section D: Estimation and Design-Based Inference 
+
+## Survey design specification
+
+Design-based inference uses the probabilities generated by the sampling design rather than assuming that the observed sample is a simple random sample from an unlimited population. The `survey` package in R is used to specify the sample design and calculate estimates and standard errors. In the stratified sample, the design object identifies the stratum, applies the final sampling weights and includes the finite population size for each stratum. Only responding households contribute observed outcome values. The final weights account for both the initial unequal selection probabilities, where applicable, and the within-stratum response adjustment.
+
+```{r survey-design-object}
+respondents <- selected_sample %>%
+  filter(respondent == 1, !is.na(outage_hours_observed))
+
+strat_design <- svydesign(
+  ids = ~1,
+  strata = ~stratum,
+  weights = ~final_weight,
+  fpc = ~Nh,
+  data = respondents,
+  nest = TRUE
+)
+```
+
+The design uses `ids = ~1` because households are selected directly within strata; no first-stage cluster sample is drawn. The `strata` argument identifies the four settlement groups. The `weights` argument supplies the final respondent weights, and `fpc` supplies the population size of each stratum. This specification reflects the stratified design used in this study.
+
+## Estimation of the population mean
+
+The estimated population mean is obtained using the survey-weighted mean. The estimated variance is calculated from the specified stratified design. The standard error is the square root of the estimated variance. A 95% confidence interval is obtained from the estimate and its standard error.
+
+The coefficient of variation is calculated as the standard error divided by the point estimate, expressed as a percentage. It describes the standard error relative to the magnitude of the estimate. The design effect compares the variance under the specified design with the variance under an equivalent SRS benchmark, as defined by the survey package.
+
+```{r stratified-estimation, results='asis'}
+
+strat_mean <- svymean(~outage_hours_observed, strat_design, deff = TRUE)
+strat_estimate <- as.numeric(coef(strat_mean)[1])
+strat_se <- as.numeric(SE(strat_mean)[1])
+strat_variance <- strat_se^2
+strat_ci <- as.numeric(confint(strat_mean)[1, ])
+strat_cv <- 100 * strat_se / abs(strat_estimate)
+strat_deff <- tryCatch(
+  as.numeric(deff(strat_mean)[1]),
+  error = function(e) NA_real_
+)
+
+strat_results_vertical <- data.frame(
+  Metric = c(
+    "Sampling Design",
+    "Point Estimate (hours)",
+    "Estimated Variance",
+    "Standard Error",
+    "95% CI Lower Bound",
+    "95% CI Upper Bound",
+    "Coefficient of Variation (%)",
+    "Design Effect (DEFF)",
+    "CI Half-Width (hours)"
+  ),
+  Value = c(
+    "Stratified SRSWOR",
+    round(strat_estimate, 4),
+    round(strat_variance, 4),
+    round(strat_se, 4),
+    round(strat_ci[1], 4),
+    round(strat_ci[2], 4),
+    round(strat_cv, 4),
+    round(strat_deff, 4),
+    round((strat_ci[2] - strat_ci[1]) / 2, 4)
+  )
+)
+
+# Print using xtable with bottom caption placement
+print(
+  xtable(
+    strat_results_vertical, 
+    caption = "Design-based estimates for the realised stratified sample.", 
+    label = "tab:strat_est",
+    align = c("l", "p{5.5cm}", "r")
+  ),
+  type = "latex",
+  comment = FALSE,
+  caption.placement = "bottom",
+  booktabs = TRUE,
+  include.rownames = FALSE,
+  table.placement = "!ht"
+)
+```
+
+## SRSWOR benchmark sample  
+
+An SRSWOR benchmark sample is selected from the same finite population. Its gross sample size is set equal to the gross sample size used for stratified sampling. A response indicator is generated using the same assumed response probability. The responding units receive a non-response-adjusted weight equal to the population size divided by the number of respondents.  
+
+
+```{r srs-benchmark, results='asis'}
+
+set.seed(2554365)
+
+strat_results <- data.frame(
+  Design = "Stratified SRSWOR",
+  Estimate = strat_estimate,
+  Estimated_variance = strat_variance,
+  Standard_error = strat_se,
+  CI_lower = strat_ci[1],
+  CI_upper = strat_ci[2],
+  CV_percent = strat_cv,
+  Design_effect = strat_deff,
+  CI_half_width = (strat_ci[2] - strat_ci[1]) / 2
+)
+
+srs_sample <- population %>%
+  slice_sample(n = gross_n, replace = FALSE) %>%
+  mutate(
+    Nh_total = N,
+    inclusion_probability = gross_n / N,
+    base_weight = 1 / inclusion_probability,
+    respondent = rbinom(n(), size = 1, prob = 1 - nonresponse_rate)
+  )
+
+srs_respondents <- srs_sample %>%
+  filter(respondent == 1) %>%
+  mutate(
+    final_weight = N / n(),
+    outage_hours_observed = outage_hours
+  )
+
+srs_design <- svydesign(
+  ids = ~1,
+  weights = ~final_weight,
+  fpc = ~Nh_total,
+  data = srs_respondents
+)
+
+srs_mean <- svymean(~outage_hours_observed, srs_design, deff = TRUE)
+srs_estimate <- as.numeric(coef(srs_mean)[1])
+srs_se <- as.numeric(SE(srs_mean)[1])
+srs_ci <- as.numeric(confint(srs_mean)[1, ])
+srs_deff <- tryCatch(
+  as.numeric(deff(srs_mean)[1]),
+  error = function(e) NA_real_
+)
+
+srs_results <- data.frame(
+  Design = "SRSWOR benchmark",
+  Estimate = srs_estimate,
+  Estimated_variance = srs_se^2,
+  Standard_error = srs_se,
+  CI_lower = srs_ci[1],
+  CI_upper = srs_ci[2],
+  CV_percent = 100 * srs_se / abs(srs_estimate),
+  Design_effect = srs_deff,
+  CI_half_width = (srs_ci[2] - srs_ci[1]) / 2
+)
+
+naive_strat_mean <- mean(respondents$outage_hours_observed)
+naive_srs_mean <- mean(srs_respondents$outage_hours_observed)
+
+comparison_realised <- bind_rows(strat_results, srs_results) %>%
+  mutate(
+    True_finite_population_mean = true_mean,
+    Difference_from_truth = Estimate - true_mean,
+    Unweighted_respondent_mean = c(naive_strat_mean, naive_srs_mean)
+  )
+
+# Transpose the horizontal comparison table into a vertical 3-column format
+strat_vals <- unlist(comparison_realised[1, -1])
+srs_vals <- unlist(comparison_realised[2, -1])
+
+vertical_comparison <- data.frame(
+  Metric = c(
+    "Point Estimate (hours)",
+    "Estimated Variance",
+    "Standard Error",
+    "95% CI Lower Bound",
+    "95% CI Upper Bound",
+    "Coefficient of Variation (%)",
+    "Design Effect (DEFF)",
+    "CI Half-Width (hours)",
+    "True Population Mean (hours)",
+    "Difference from Truth",
+    "Unweighted Respondent Mean"
+  ),
+  "Stratified SRSWOR" = as.numeric(strat_vals),
+  "SRSWOR benchmark" = as.numeric(srs_vals)
+)
+
+print(
+  xtable(
+    vertical_comparison,
+    caption = "Realised-sample comparison with the true finite-population mean.",
+    label = "tab:srs_benchmark",
+    digits = 4,
+    align = c("l", "p{5.5cm}", "r", "r")
+  ),
+  type = "latex",
+  comment = FALSE,
+  caption.placement = "bottom",
+  booktabs = TRUE,
+  include.rownames = FALSE,
+  table.placement = "!ht"
+)
+```
+
+The unweighted sample mean is also useful as a descriptive comparison. Under equal stratum population sizes and equal sample allocation, the initial selection fractions are equal across strata, so the base sampling weights are equal. The response-adjusted weights may nevertheless differ if the realised response counts differ between strata. The design-adjusted estimate is therefore the main estimate reported for inference.
+
+## Inclusion probabilities and weights
+
+The inclusion probability is the chance that a household is selected in the initial sample. Under the stratified design it is calculated separately within each stratum. The base weight is its inverse. The final weight additionally adjusts for non-response within the stratum.
+
+The following table reports the realised selection and response information by stratum.
+
+
+```{r weights-summary, results='asis'}
+
+weight_summary <- selected_sample %>%
+  group_by(stratum, settlement_type) %>%
+  summarise(
+    Population_size = first(Nh),
+    Gross_sample = n(),
+    Respondents = sum(respondent),
+    Inclusion_probability = first(inclusion_probability),
+    Base_weight = first(base_weight),
+    Final_weight_for_respondents = first(final_weight[respondent == 1]),
+    .groups = "drop"
+  )
+
+# Transpose the table so metrics are rows and settlement strata are columns
+metrics_mat <- as.matrix(weight_summary[, c(
+  "Population_size", "Gross_sample", "Respondents", 
+  "Inclusion_probability", "Base_weight", "Final_weight_for_respondents"
+)])
+t_mat <- t(metrics_mat)
+colnames(t_mat) <- weight_summary$settlement_type
+
+weights_vertical <- data.frame(
+  Metric = c(
+    "Population Size",
+    "Gross Sample",
+    "Respondents",
+    "Inclusion Probability",
+    "Base Weight",
+    "Final Weight"
+  ),
+  check.names = FALSE
+)
+weights_vertical <- cbind(weights_vertical, as.data.frame(t_mat))
+
+print(
+  xtable(
+    weights_vertical,
+    caption = "Inclusion probabilities and sampling weights by stratum.",
+    label = "tab:weights_summary",
+    digits = 4,
+    align = c("l", "p{4.2cm}", "r", "r", "r", "r")
+  ),
+  type = "latex",
+  comment = FALSE,
+  caption.placement = "bottom",
+  booktabs = TRUE,
+  include.rownames = FALSE,
+  table.placement = "!ht"
+)
+```
+
+## Precision assessment
+
+The required half-width is 1.10 hours under the baseline planning mean. The realised confidence-interval half-width is compared with this target. The target is achieved in the realised sample if the estimated half-width is no greater than 1.10 hours. Since sample estimates and standard errors vary from one sample to another, a single realised sample may not achieve the target even when the sample size was planned to do so.
+
+The design effect is interpreted relative to the SRS variance benchmark. A value below one indicates a variance reduction relative to the reference SRS design, while a value above one indicates a larger variance. The comparison should be interpreted alongside the empirical results from the repeated sampling study in Section E.
+
+```{r precision-check, results='asis'}
+
+precision_check <- data.frame(
+  Design = c("Stratified SRSWOR", "SRSWOR benchmark"),
+  Estimated_half_width = c(
+    strat_results$CI_half_width,
+    srs_results$CI_half_width
+  ),
+  Required_half_width = target_half_width
+) %>%
+  mutate(
+    Meets_target = Estimated_half_width <= Required_half_width
+  )
+
+print(
+  xtable(
+    precision_check,
+    caption = "Assessment of the required confidence-interval half-width.",
+    label = "tab:precision_check",
+    digits = 4,
+    align = c("l", "p{4.5cm}", "r", "r", "c")
+  ),
+  type = "latex",
+  comment = FALSE,
+  caption.placement = "bottom",
+  booktabs = TRUE,
+  include.rownames = FALSE,
+  table.placement = "H"
+)
+```
+
+
+# Section E: Repeated-Sampling Simulation 
+
+## Simulation procedure
+
+A Monte Carlo simulation is conducted to compare the repeated-sampling performance of stratified SRSWOR and SRSWOR. The finite population generated in Section C remains fixed throughout the simulation. Only the sample selection and response process are repeated. This reflects the design-based setting in which the finite population values are treated as fixed and randomness arises from selecting a sample.
+
+The procedure is repeated 1,000 times. In each repetition, a stratified sample is selected without replacement, followed by a simulated response process. A separate SRSWOR sample of the same gross size is also selected from the full population. In both designs, the point estimate, estimated standard error and 95% confidence limits are retained.
+
+The same 10% response probability is used for both designs. Non-response adjustment is performed within each stratum for the stratified sample and across the full sample for SRSWOR. The adjustment assumes response is random within the relevant adjustment group.
+
+## Repeated-sampling functions
+
+The functions below carry out one sample and estimation cycle for each design. They return the estimate, estimated standard error and confidence limits. Repetitions in which a stratum has no respondents are discarded and redrawn, since a stratum mean cannot be estimated from an empty respondent group. This event should be very unlikely at the planned sample sizes.
+
+```{r simulation-functions}
+one_stratified_rep <- function(pop, seed) {
+  set.seed(seed)
+
+  ss <- pop %>%
+    group_by(stratum) %>%
+    slice_sample(n = gross_n / H, replace = FALSE) %>%
+    ungroup() %>%
+    mutate(respondent = rbinom(n(), 1, 1 - nonresponse_rate))
+
+  ss_resp <- ss %>%
+    filter(respondent == 1) %>%
+    group_by(stratum) %>%
+    mutate(
+      Nh = N_h[first(stratum)],
+      final_weight = Nh / n()
+    ) %>%
+    ungroup()
+
+  if (n_distinct(ss_resp$stratum) != H) return(NULL)
+
+  des <- svydesign(
+    ids = ~1, strata = ~stratum, weights = ~final_weight,
+    fpc = ~Nh, data = ss_resp, nest = TRUE
+  )
+
+  est <- svymean(~outage_hours, des)
+  ci <- as.numeric(confint(est)[1, ])
+
+  data.frame(
+    estimate = as.numeric(coef(est)[1]),
+    se = as.numeric(SE(est)[1]),
+    lower = ci[1],
+    upper = ci[2]
+  )
+}
+
+one_srs_rep <- function(pop, seed) {
+  set.seed(seed)
+
+  ss <- pop %>%
+    slice_sample(n = gross_n, replace = FALSE) %>%
+    mutate(respondent = rbinom(n(), 1, 1 - nonresponse_rate)) %>%
+    filter(respondent == 1)
+
+  if (nrow(ss) == 0) return(NULL)
+
+  ss <- ss %>%
+    mutate(
+      N_total = N,
+      final_weight = N / nrow(ss)
+    )
+
+  des <- svydesign(
+    ids = ~1, weights = ~final_weight,
+    fpc = ~N_total, data = ss
+  )
+
+  est <- svymean(~outage_hours, des)
+  ci <- as.numeric(confint(est)[1, ])
+
+  data.frame(
+    estimate = as.numeric(coef(est)[1]),
+    se = as.numeric(SE(est)[1]),
+    lower = ci[1],
+    upper = ci[2]
+  )
+}
+```
+
+## Running the simulation
+
+The simulation uses 1,000 repetitions. A separate seed is supplied to each repetition to make the results reproducible. The population itself is not regenerated.
+
+```{r run-simulation}
+R <- 1000
+simulation_seeds <- 50000 + seq_len(R)
+
+strat_sim <- bind_rows(lapply(
+  simulation_seeds,
+  function(s) {
+    ans <- one_stratified_rep(population, s)
+    if (is.null(ans)) {
+      repeat {
+        s <- s + 100000
+        ans <- one_stratified_rep(population, s)
+        if (!is.null(ans)) break
+      }
+    }
+    ans
+  }
+))
+
+srs_sim <- bind_rows(lapply(
+  simulation_seeds,
+  function(s) {
+    ans <- one_srs_rep(population, s + 200000)
+    if (is.null(ans)) {
+      repeat {
+        s <- s + 100000
+        ans <- one_srs_rep(population, s + 200000)
+        if (!is.null(ans)) break
+      }
+    }
+    ans
+  }
+))
+
+stopifnot(nrow(strat_sim) == R, nrow(srs_sim) == R)
+```
+
+## Performance measures 
+
+The empirical bias is the average difference between the estimates and the true finite-population mean. Relative bias expresses this difference as a percentage of the true mean. The empirical standard error is the standard deviation of the estimates across repetitions. The average estimated standard error is the mean of the standard errors calculated within each repetition.
+
+The root mean squared error (RMSE) combines variance and bias. It is calculated as the square root of the average squared difference between the estimates and the true mean. Confidence-interval coverage is the proportion of the 95% confidence intervals that contain the true finite-population mean. The Monte Carlo standard error of the estimated coverage probability measures the simulation uncertainty in the estimated coverage rate.
+
+For an estimated coverage probability \(\hat{p}\) based on \(R\) repetitions, its Monte Carlo standard error is
+
+\[
+MCSE(\hat{p})=
+\sqrt{\frac{\hat{p}(1-\hat{p})}{R}},
+\tag{10}
+\]
+
+where \(R\) is the number of simulation repetitions.
+
+```{r simulation-summary, results='asis'}
+
+summarise_performance <- function(results, design_name, truth) {
+  bias <- mean(results$estimate - truth)
+  coverage <- mean(results$lower <= truth & results$upper >= truth)
+
+  data.frame(
+    Design = design_name,
+    Bias = bias,
+    Relative_bias_percent = 100 * bias / truth,
+    Empirical_SE = sd(results$estimate),
+    Average_estimated_SE = mean(results$se),
+    RMSE = sqrt(mean((results$estimate - truth)^2)),
+    Coverage_percent = 100 * coverage,
+    Coverage_MCSE_percent = 100 * sqrt(coverage * (1 - coverage) / nrow(results)),
+    Average_CI_width = mean(results$upper - results$lower)
+  )
+}
+
+simulation_summary <- bind_rows(
+  summarise_performance(strat_sim, "Stratified SRSWOR", true_mean),
+  summarise_performance(srs_sim, "SRSWOR benchmark", true_mean)
+)
+
+empirical_deff <- var(strat_sim$estimate) / var(srs_sim$estimate)
+simulation_summary$Empirical_DEFF_relative_to_SRS <- c(empirical_deff, 1)
+
+# Transpose into a vertical 3-column format (Metric, Stratified, SRSWOR)
+strat_vals <- unlist(simulation_summary[1, -1])
+srs_vals <- unlist(simulation_summary[2, -1])
+
+vertical_sim_summary <- data.frame(
+  Metric = c(
+    "Bias",
+    "Relative Bias (%)",
+    "Empirical SE",
+    "Average Estimated SE",
+    "RMSE",
+    "Coverage (%)",
+    "Coverage MCSE (%)",
+    "Average CI Width",
+    "Empirical DEFF (rel. to SRS)"
+  ),
+  "Stratified SRSWOR" = as.numeric(strat_vals),
+  "SRSWOR benchmark" = as.numeric(srs_vals),
+  check.names = FALSE
+)
+
+print(
+  xtable(
+    vertical_sim_summary,
+    caption = "Monte Carlo performance measures based on 1,000 repetitions.",
+    label = "tab:sim_summary",
+    digits = 4,
+    align = c("l", "p{5.5cm}", "r", "r")
+  ),
+  type = "latex",
+  comment = FALSE,
+  caption.placement = "bottom",
+  booktabs = TRUE,
+  include.rownames = FALSE,
+  table.placement = "H"
+)
+```
+
+
+## Comparison of the sampling designs
+
+Bias close to zero indicates that the estimator is approximately unbiased over repeated samples. A smaller empirical standard error indicates greater repeated sampling precision. The average estimated standard error can be compared with the empirical standard error to assess whether the design-based variance estimator reflects the actual variation across repeated samples.
+
+The RMSE is useful because it accounts for both bias and variance. A smaller RMSE indicates that estimates tend to be closer to the true finite population mean. Confidence interval coverage should be close to 95% if the interval procedure performs as intended. Coverage should not be interpreted in isolation: a very wide interval may achieve high coverage but provide limited precision. The empirical design effect reported in the simulation table is the ratio of the empirical variance of the stratified estimates to the empirical variance of the SRSWOR estimates. A value below one indicates that the stratified estimates varied less across repetitions for this simulated population.
+
+The average confidence interval width provides a direct comparison of precision. The design with the narrower average interval is more precise under the simulated population and response assumptions. The comparison is specific to the finite population generated for this study and should not be generalised to all municipal settings.
+
+\newpage
+
+
+```{r simulation-estimate-distributions, fig.cap="Distribution of repeated-sample estimates under the two sampling designs.", fig.width=6.0, fig.height=3.5, fig.pos="H"}
+simulation_plot_data <- bind_rows(
+  strat_sim %>% mutate(Design = "Stratified SRSWOR"),
+  srs_sim %>% mutate(Design = "SRSWOR benchmark")
+)
+
+ggplot(simulation_plot_data, aes(x = estimate, fill = Design)) +
+  geom_density(alpha = 0.35) +
+  geom_vline(xintercept = true_mean, linetype = "dashed", linewidth = 0.8) +
+  labs(
+    x = "Estimated mean monthly outage duration (hours)",
+    y = "Density",
+    fill = "Sampling design"
+  ) +
+  theme_minimal(base_size = 11) +
+  theme(
+    legend.position = "bottom",
+    axis.text = element_text(size = 10, face = "bold"),
+    axis.title = element_text(size = 11, face = "bold"),
+    legend.text = element_text(size = 10),
+    legend.title = element_text(size = 10, face = "bold")
+  )
+```
+
+
+The dashed vertical line marks the true finite-population mean. The spread and location of the two distributions can be used to assess relative precision and bias. Numerical conclusions should be based on the performance table above rather than the plot alone.
+
+## Simulation limitations
+
+The repeated sampling study is conditional on the generated finite population, the assumed response mechanism and the selected sampling designs. The simulation does not introduce coverage error or measurement error. It also assumes that response is random within each stratum for the stratified design and random across the population for SRSWOR. In practice, response may depend on household characteristics or outage experiences, in which case the simple non-response adjustment may not remove bias.
+
+The simulation therefore evaluates sampling performance under controlled conditions. It does not establish that the same design will achieve identical precision in an actual municipality. The results should be interpreted as evidence about the two designs for the finite population and assumptions used here.
+
+# Section F: Overall Discussion and Conclusion
+
+This study demonstrates how a probability sample survey can be planned and evaluated when the target population is finite and contains identifiable subgroups. The simulated population consists of 10,000 households divided equally among four settlement types. Stratified random sampling without replacement is used as the primary design, with SRSWOR serving as a benchmark. The primary parameter is the mean monthly outage duration per household. The planning mean is used to set the precision target before the population is generated, while the true finite-population mean is calculated from the completed population. This distinction ensures that the sample-size calculation is not based on a value incorrectly presented as a known population result.
+
+The selected design guarantees representation from all four settlement types and allows the estimator to account for the population structure. Equal allocation is adopted to keep the design and its implementation straightforward. The variance formula includes the finite population correction, and the gross sample size includes an allowance for anticipated non-response. The final assessment considers the realised sample and the repeated-sampling results. Numerical results should be interpreted using the estimates and performance measures generated in R. In particular, the comparison should consider bias, empirical standard error, average estimated standard error, RMSE, confidence-interval coverage and average interval width. If stratified sampling produces lower empirical variability and narrower confidence intervals while maintaining coverage close to 95%, this would support its use for the simulated population. If it does not, the results should be discussed in relation to the actual within and between stratum variation rather than assuming that stratification must always improve precision.
+
+Overall, the study illustrates that the choice of sampling design should be informed by the structure of the population and the parameter being estimated. Stratification is useful when the grouping variable is related to the outcome and when the strata are represented appropriately in the sample. The repeated sampling assessment provides a practical way to evaluate these properties against a benchmark when the complete finite population is available for simulation.
+
+# References
+
+<div id="refs"></div>
+
+<!-- \clearpage -->
+
+<!-- # Appendix A: R Code -->
+
+<!-- ```{r appendix-code, echo=TRUE, eval=FALSE} -->
+
+<!-- library(survey) -->
+<!-- library(dplyr) -->
+<!-- library(ggplot2) -->
+<!-- library(xtable) -->
+<!-- setwd("C:/Users/keleb/Desktop/2026 MS/Applied Sampling") -->
+
+<!-- #Population-structure -->
+
+<!-- strata_info <- data.frame( -->
+<!--   Stratum = 1:4, -->
+<!--   "Settlement type" = c( -->
+<!--     "Urban suburbs", "Townships", -->
+<!--     "Rural villages", "Informal settlements" -->
+<!--   ), -->
+<!--   "Population size Nh" = rep(2500L, 4) -->
+<!-- ) -->
+
+<!-- print( -->
+<!--   xtable( -->
+<!--     strata_info, -->
+<!--     caption = "Finite-population structure by settlement type.", -->
+<!--     label = "tab:pop_struct", -->
+<!--     align = c("l", "c", "p{4.5cm}", "r") -->
+<!--   ), -->
+<!--   type = "latex", -->
+<!--   comment = FALSE, -->
+<!--   caption.placement = "bottom", -->
+<!--   booktabs = TRUE, -->
+<!--   include.rownames = FALSE, -->
+<!--   table.placement = "!ht" -->
+<!-- ) -->
+
+<!-- #sample-size-calculation -->
+
+<!-- N_h <- rep(2500,4)  -->
+<!-- mu_h <- c(18, 30, 26, 14)  -->
+<!-- sd_h <- c(8, 12, 11, 7)  -->
+<!-- H <- length(N_h)  -->
+<!-- N <- sum(N_h)  -->
+<!-- W_h <- N_h / N  -->
+<!-- planning_mean <- sum(W_h * mu_h)  -->
+<!-- confidence_level <- 0.95  -->
+<!-- z_value <- qnorm(1 - (1 - confidence_level) / 2)  -->
+<!-- relative_precision <- 0.05  -->
+<!-- target_half_width <- relative_precision * planning_mean  -->
+<!-- nonresponse_rate <- 0.10  -->
+
+<!-- stratified_variance <- function(n_total, N_h, sd_h) {  -->
+<!--   H <- length(N_h)  -->
+<!--   if (n_total %% H != 0) return(Inf)  -->
+<!--   n_h <- rep(n_total / H, H)  -->
+<!--   if (any(n_h <= 0) || any(n_h > N_h)) return(Inf)  -->
+<!--   W_h <- N_h / sum(N_h)  -->
+<!--   sum(W_h^2 * (1 - n_h / N_h) * sd_h^2 / n_h)  -->
+<!-- }  -->
+
+<!-- candidate_n <- seq(H, min(N_h) * H, by = H)  -->
+<!-- candidate_half_width <- vapply(  -->
+<!--   candidate_n,  -->
+<!--   function(n) z_value * sqrt(stratified_variance(n, N_h, sd_h)),  -->
+<!--   numeric(1)  -->
+<!-- )  -->
+<!-- net_n <- candidate_n[which(candidate_half_width <= target_half_width)[1]]  -->
+<!-- n_h_net <- rep(net_n / H, H)  -->
+
+<!-- gross_n_raw <- ceiling(net_n / (1 - nonresponse_rate))  -->
+<!-- gross_n <- ceiling(gross_n_raw / H) * H  -->
+<!-- n_h_gross <- rep(gross_n / H, H)  -->
+
+<!-- sample_size_summary <- data.frame(  -->
+<!--   Quantity = c(  -->
+<!--     "Planning mean (hours)", "Target half-width (hours)",  -->
+<!--     "Required net sample size", "Net sample per stratum",  -->
+<!--     "Anticipated non-response rate", "Gross sample size",  -->
+<!--     "Gross sample per stratum"  -->
+<!--   ),  -->
+<!--   Value = c(  -->
+<!--     planning_mean, target_half_width, net_n, net_n / H,  -->
+<!--     nonresponse_rate, gross_n, gross_n / H  -->
+<!--   )  -->
+<!-- )  -->
+
+<!-- print( -->
+<!--   xtable( -->
+<!--     sample_size_summary, -->
+<!--     caption = "Sample-size calculation using the planning assumptions.", -->
+<!--     label = "tab:sample_size", -->
+<!--     digits = 2, -->
+<!--     align = c("l", "p{6.5cm}", "r") -->
+<!--   ), -->
+<!--   type = "latex", -->
+<!--   comment = FALSE, -->
+<!--   caption.placement = "bottom", -->
+<!--   booktabs = TRUE, -->
+<!--   include.rownames = FALSE, -->
+<!--   table.placement = "!ht" -->
+<!-- ) -->
+
+
+<!-- #Precision-sample-size-plot -->
+
+<!-- #Continuous range of relative precision values -->
+<!-- precision_grid <- seq(0.00, 0.10, length.out = 200) -->
+
+<!-- #Required net sample size for each precision level -->
+<!-- required_net_n <- vapply(precision_grid, function(p) { -->
+
+<!--   target_width <- p * planning_mean -->
+
+<!--   eligible_n <- candidate_n[ -->
+<!--     candidate_half_width <= target_width -->
+<!--   ] -->
+
+<!--   if (length(eligible_n) == 0) { -->
+<!--     return(NA_real_) -->
+<!--   } -->
+
+<!--   min(eligible_n) -->
+
+<!-- }, numeric(1)) -->
+
+<!-- #Prepare plotting data -->
+<!-- precision_plot_data <- data.frame( -->
+<!--   Relative_Precision = precision_grid * 100, -->
+<!--   Required_Sample_Size = required_net_n -->
+<!-- ) -->
+
+<!-- #Plot the relationship -->
+<!-- ggplot( -->
+<!--   precision_plot_data, -->
+<!--   aes(x = Relative_Precision, y = Required_Sample_Size) -->
+<!-- ) + -->
+<!--   geom_line(linewidth = 0.8) + -->
+<!--   geom_vline( -->
+<!--     xintercept = relative_precision * 100, -->
+<!--     colour = "red", -->
+<!--     linetype = "dashed", -->
+<!--     linewidth = 0.8 -->
+<!--   ) + -->
+<!--   labs( -->
+<!--     x = "Relative precision (%)", -->
+<!--     y = "Required net sample size" -->
+<!--   ) + -->
+<!--   scale_x_continuous( -->
+<!--     breaks = seq(1, 10, by = 1) -->
+<!--   ) + -->
+<!--   theme_minimal(base_size = 12) + -->
+<!--   theme( -->
+<!--     axis.title = element_text(face = "bold", size = 11), -->
+<!--     axis.text = element_text(face = "bold", size = 10), -->
+<!--     panel.grid.minor = element_blank(), -->
+<!--     plot.margin = margin(2, 4, 2, 4) -->
+<!--   ) -->
+
+<!-- #Sensitivity-analysis -->
+
+<!-- planning_mean <- 22 -->
+
+<!-- mean_fractions <- c(0.25, 0.50, 0.75, 1.00) -->
+<!-- relative_margins <- seq(0.02, 0.10, by = 0.005) -->
+
+<!-- sensitivity_data <- expand.grid( -->
+<!--   fraction = mean_fractions, -->
+<!--   relative_margin = relative_margins -->
+<!-- ) %>% -->
+<!--   mutate( -->
+<!--     assumed_mean = fraction * planning_mean, -->
+<!--     target_d = relative_margin * assumed_mean -->
+<!--   ) -->
+
+<!-- sensitivity_data$required_n <- vapply( -->
+<!--   seq_len(nrow(sensitivity_data)), -->
+<!--   function(j) { -->
+
+<!--     d <- sensitivity_data$target_d[j] -->
+
+<!--     ok <- candidate_n[ -->
+<!--       vapply( -->
+<!--         candidate_n, -->
+<!--         function(n) { -->
+<!--           z_value * sqrt( -->
+<!--             stratified_variance(n, N_h, sd_h) -->
+<!--           ) <= d -->
+<!--         }, -->
+<!--         logical(1) -->
+<!--       ) -->
+<!--     ] -->
+
+<!--     if (length(ok) == 0) NA_real_ else min(ok) -->
+<!--   }, -->
+<!--   numeric(1) -->
+<!-- ) -->
+
+<!-- sensitivity_data$scenario <- factor( -->
+<!--   paste0(sensitivity_data$fraction * 100, "% of baseline"), -->
+<!--   levels = paste0(mean_fractions * 100, "% of baseline") -->
+<!-- ) -->
+
+<!-- ggplot( -->
+<!--   sensitivity_data, -->
+<!--   aes( -->
+<!--     x = relative_margin * 100, -->
+<!--     y = required_n, -->
+<!--     colour = scenario -->
+<!--   ) -->
+<!-- ) + -->
+<!--   geom_line(linewidth = 0.9, na.rm = TRUE) + -->
+<!--   geom_point(size = 1.3, na.rm = TRUE) + -->
+<!--   labs( -->
+<!--     x = "Confidence-interval half-width (% of assumed mean)", -->
+<!--     y = "Required net sample size", -->
+<!--     colour = "Assumed mean" -->
+<!--   ) + -->
+<!--   scale_x_continuous( -->
+<!--     breaks = seq(2, 10, by = 1) -->
+<!--   ) + -->
+<!--   theme_minimal(base_size = 12) + -->
+<!--   theme( -->
+<!--     axis.title = element_text(face = "bold", size = 11), -->
+<!--     axis.text = element_text(face = "bold", size = 10), -->
+<!--     legend.title = element_text(face = "bold", size = 10), -->
+<!--     legend.text = element_text(size = 9), -->
+<!--     legend.position = "bottom", -->
+<!--     panel.grid.minor = element_blank(), -->
+<!--     plot.margin = margin(2, 4, 2, 4) -->
+<!--   ) -->
+
+<!-- #Generating population -->
+<!-- set.seed(2554365) -->
+
+
+<!-- # Number of strata  -->
+<!-- H <- 4  -->
+
+<!-- # Population sizes for each stratum  -->
+<!-- N_h <- c(2500, 2500, 2500, 2500)  -->
+
+<!-- # Settlement types  -->
+<!-- strata_info <- data.frame(  -->
+<!--   stratum = 1:4,  -->
+<!--   settlement_type = c(  -->
+<!--     "Urban suburbs",  -->
+<!--     "Townships",  -->
+<!--     "Rural villages",  -->
+<!--     "Informal settlements"  -->
+<!--   ),  -->
+<!--   Nh = N_h  -->
+<!-- )  -->
+
+<!-- # Mean monthly outage hours for each stratum  -->
+<!-- mu_h <- c(16, 32, 25, 12)  -->
+
+<!-- # Standard deviations for each stratum  -->
+<!-- sd_h <- c(sqrt(32), sqrt(80), sqrt(69.4), sqrt(24))  -->
+
+<!-- population <- bind_rows(lapply(seq_len(H), function(h) {  -->
+<!--   shape_h <- mu_h[h]^2 / sd_h[h]^2  -->
+<!--   scale_h <- sd_h[h]^2 / mu_h[h]  -->
+<!--   Nh <- N_h[h]  -->
+
+<!--   data.frame(  -->
+<!--     household_id = sprintf("HH%05d", sum(N_h[seq_len(h - 1)]) + seq_len(Nh)),  -->
+<!--     stratum = h,  -->
+<!--     settlement_type = strata_info$settlement_type[h],  -->
+<!--     grid_zone = paste0("Z", h, "_", sample(1:25, Nh, replace = TRUE)),  -->
+<!--     household_size = pmax(1L, rpois(Nh, lambda = 3) + 1L),  -->
+<!--     backup_power = rbinom(  -->
+<!--       Nh, size = 1,  -->
+<!--       prob = c(0.45, 0.20, 0.12, 0.08)[h]  -->
+<!--     ),  -->
+<!--     outage_hours = rgamma(Nh, shape = shape_h, scale = scale_h)  -->
+<!--   )  -->
+<!-- }))  -->
+
+<!-- stopifnot(  -->
+<!--   nrow(population) == 10000,  -->
+<!--   !anyDuplicated(population$household_id),  -->
+<!--   all(population$outage_hours >= 0),  -->
+<!--   all(table(population$stratum) == 2500)  -->
+<!-- )  -->
+
+<!-- true_mean <- mean(population$outage_hours)  -->
+<!-- true_total <- sum(population$outage_hours)  -->
+
+<!-- population_summary <- population %>%  -->
+<!--   group_by(stratum, settlement_type) %>%  -->
+<!--   summarise(  -->
+<!--     Nh = n(),  -->
+<!--     finite_mean = mean(outage_hours),  -->
+<!--     finite_sd = sd(outage_hours),  -->
+<!--     finite_variance = var(outage_hours),  -->
+<!--     .groups = "drop"  -->
+<!--   )  -->
+
+<!-- knitr::kable(  -->
+<!--   population_summary, digits = 3,  -->
+<!--   caption = "Generated finite-population characteristics by stratum."  -->
+<!-- )  -->
+
+<!-- cat(  -->
+<!--   "True finite-population mean:", round(true_mean, 3), "hours\n\n",  -->
+<!--   "True finite-population total:", round(true_total, 2), "household-hours\n"  -->
+<!-- )  -->
+
+<!-- write.csv(population, "population.csv", row.names = FALSE)  -->
+
+
+<!-- #Drawing-realised-sample -->
+<!-- set.seed(2554365)  -->
+
+<!-- selected_sample <- population %>%  -->
+<!--   group_by(stratum) %>%  -->
+<!--   slice_sample(n = gross_n / H, replace = FALSE) %>%  -->
+<!--   ungroup() %>%  -->
+<!--   group_by(stratum) %>%  -->
+<!--   mutate(  -->
+<!--     Nh = nrow(population) / H,  -->
+<!--     nh_gross = n(),  -->
+<!--     inclusion_probability = nh_gross / Nh,  -->
+<!--     base_weight = 1 / inclusion_probability,  -->
+<!--     respondent = rbinom(n(), size = 1, prob = 1 - nonresponse_rate)  -->
+<!--   ) %>%  -->
+<!--   ungroup()  -->
+
+<!-- response_counts <- selected_sample %>%  -->
+<!--   group_by(stratum, settlement_type) %>%  -->
+<!--   summarise(  -->
+<!--     gross_selected = n(),  -->
+<!--     respondents = sum(respondent),  -->
+<!--     response_rate = mean(respondent),  -->
+<!--     .groups = "drop"  -->
+<!--   )  -->
+
+<!-- selected_sample <- selected_sample %>%  -->
+<!--   group_by(stratum) %>%  -->
+<!--   mutate(  -->
+<!--     responding_n = sum(respondent),  -->
+<!--     final_weight = ifelse(  -->
+<!--       respondent == 1,  -->
+<!--       (nrow(population) / H) / responding_n,  -->
+<!--       NA_real_  -->
+<!--     ),  -->
+<!--     outage_hours_observed = ifelse(  -->
+<!--       respondent == 1, outage_hours, NA_real_  -->
+<!--     )  -->
+<!--   ) %>%  -->
+<!--   ungroup()  -->
+
+<!-- knitr::kable(  -->
+<!--   response_counts, digits = 3,  -->
+<!--   caption = "Gross sample and realised response by stratum."  -->
+<!-- )  -->
+
+<!-- write.csv(selected_sample, "sample.csv", row.names = FALSE)  -->
+
+
+<!-- #Survey-design-object -->
+<!-- respondents <- selected_sample %>% -->
+<!--   filter(respondent == 1, !is.na(outage_hours_observed)) -->
+
+<!-- strat_design <- svydesign( -->
+<!--   ids = ~1, -->
+<!--   strata = ~stratum, -->
+<!--   weights = ~final_weight, -->
+<!--   fpc = ~Nh, -->
+<!--   data = respondents, -->
+<!--   nest = TRUE -->
+<!-- ) -->
+
+<!-- #Stratified-estimation -->
+
+<!-- strat_mean <- svymean(~outage_hours_observed, strat_design, deff = TRUE) -->
+<!-- strat_estimate <- as.numeric(coef(strat_mean)[1]) -->
+<!-- strat_se <- as.numeric(SE(strat_mean)[1]) -->
+<!-- strat_variance <- strat_se^2 -->
+<!-- strat_ci <- as.numeric(confint(strat_mean)[1, ]) -->
+<!-- strat_cv <- 100 * strat_se / abs(strat_estimate) -->
+<!-- strat_deff <- tryCatch( -->
+<!--   as.numeric(deff(strat_mean)[1]), -->
+<!--   error = function(e) NA_real_ -->
+<!-- ) -->
+
+<!-- strat_results_vertical <- data.frame( -->
+<!--   Metric = c( -->
+<!--     "Sampling Design", -->
+<!--     "Point Estimate (hours)", -->
+<!--     "Estimated Variance", -->
+<!--     "Standard Error", -->
+<!--     "95% CI Lower Bound", -->
+<!--     "95% CI Upper Bound", -->
+<!--     "Coefficient of Variation (%)", -->
+<!--     "Design Effect (DEFF)", -->
+<!--     "CI Half-Width (hours)" -->
+<!--   ), -->
+<!--   Value = c( -->
+<!--     "Stratified SRSWOR", -->
+<!--     round(strat_estimate, 4), -->
+<!--     round(strat_variance, 4), -->
+<!--     round(strat_se, 4), -->
+<!--     round(strat_ci[1], 4), -->
+<!--     round(strat_ci[2], 4), -->
+<!--     round(strat_cv, 4), -->
+<!--     round(strat_deff, 4), -->
+<!--     round((strat_ci[2] - strat_ci[1]) / 2, 4) -->
+<!--   ) -->
+<!-- ) -->
+
+<!-- # Print using xtable with bottom caption placement -->
+<!-- print( -->
+<!--   xtable( -->
+<!--     strat_results_vertical,  -->
+<!--     caption = "Design-based estimates for the realised stratified sample.",  -->
+<!--     label = "tab:strat_est", -->
+<!--     align = c("l", "p{5.5cm}", "r") -->
+<!--   ), -->
+<!--   type = "latex", -->
+<!--   comment = FALSE, -->
+<!--   caption.placement = "bottom", -->
+<!--   booktabs = TRUE, -->
+<!--   include.rownames = FALSE, -->
+<!--   table.placement = "!ht" -->
+<!-- ) -->
+
+
+<!-- #Srs-benchmark -->
+
+<!-- set.seed(2554365) -->
+
+<!-- strat_results <- data.frame( -->
+<!--   Design = "Stratified SRSWOR", -->
+<!--   Estimate = strat_estimate, -->
+<!--   Estimated_variance = strat_variance, -->
+<!--   Standard_error = strat_se, -->
+<!--   CI_lower = strat_ci[1], -->
+<!--   CI_upper = strat_ci[2], -->
+<!--   CV_percent = strat_cv, -->
+<!--   Design_effect = strat_deff, -->
+<!--   CI_half_width = (strat_ci[2] - strat_ci[1]) / 2 -->
+<!-- ) -->
+
+<!-- srs_sample <- population %>% -->
+<!--   slice_sample(n = gross_n, replace = FALSE) %>% -->
+<!--   mutate( -->
+<!--     Nh_total = N, -->
+<!--     inclusion_probability = gross_n / N, -->
+<!--     base_weight = 1 / inclusion_probability, -->
+<!--     respondent = rbinom(n(), size = 1, prob = 1 - nonresponse_rate) -->
+<!--   ) -->
+
+<!-- srs_respondents <- srs_sample %>% -->
+<!--   filter(respondent == 1) %>% -->
+<!--   mutate( -->
+<!--     final_weight = N / n(), -->
+<!--     outage_hours_observed = outage_hours -->
+<!--   ) -->
+
+<!-- srs_design <- svydesign( -->
+<!--   ids = ~1, -->
+<!--   weights = ~final_weight, -->
+<!--   fpc = ~Nh_total, -->
+<!--   data = srs_respondents -->
+<!-- ) -->
+
+<!-- srs_mean <- svymean(~outage_hours_observed, srs_design, deff = TRUE) -->
+<!-- srs_estimate <- as.numeric(coef(srs_mean)[1]) -->
+<!-- srs_se <- as.numeric(SE(srs_mean)[1]) -->
+<!-- srs_ci <- as.numeric(confint(srs_mean)[1, ]) -->
+<!-- srs_deff <- tryCatch( -->
+<!--   as.numeric(deff(srs_mean)[1]), -->
+<!--   error = function(e) NA_real_ -->
+<!-- ) -->
+
+<!-- srs_results <- data.frame( -->
+<!--   Design = "SRSWOR benchmark", -->
+<!--   Estimate = srs_estimate, -->
+<!--   Estimated_variance = srs_se^2, -->
+<!--   Standard_error = srs_se, -->
+<!--   CI_lower = srs_ci[1], -->
+<!--   CI_upper = srs_ci[2], -->
+<!--   CV_percent = 100 * srs_se / abs(srs_estimate), -->
+<!--   Design_effect = srs_deff, -->
+<!--   CI_half_width = (srs_ci[2] - srs_ci[1]) / 2 -->
+<!-- ) -->
+
+<!-- naive_strat_mean <- mean(respondents$outage_hours_observed) -->
+<!-- naive_srs_mean <- mean(srs_respondents$outage_hours_observed) -->
+
+<!-- comparison_realised <- bind_rows(strat_results, srs_results) %>% -->
+<!--   mutate( -->
+<!--     True_finite_population_mean = true_mean, -->
+<!--     Difference_from_truth = Estimate - true_mean, -->
+<!--     Unweighted_respondent_mean = c(naive_strat_mean, naive_srs_mean) -->
+<!--   ) -->
+
+<!-- # Transpose the horizontal comparison table into a  -->
+<!-- #vertical 3-column format for good presentation -->
+<!-- strat_vals <- unlist(comparison_realised[1, -1]) -->
+<!-- srs_vals <- unlist(comparison_realised[2, -1]) -->
+
+<!-- vertical_comparison <- data.frame( -->
+<!--   Metric = c( -->
+<!--     "Point Estimate (hours)", -->
+<!--     "Estimated Variance", -->
+<!--     "Standard Error", -->
+<!--     "95% CI Lower Bound", -->
+<!--     "95% CI Upper Bound", -->
+<!--     "Coefficient of Variation (%)", -->
+<!--     "Design Effect (DEFF)", -->
+<!--     "CI Half-Width (hours)", -->
+<!--     "True Population Mean (hours)", -->
+<!--     "Difference from Truth", -->
+<!--     "Unweighted Respondent Mean" -->
+<!--   ), -->
+<!--   "Stratified SRSWOR" = as.numeric(strat_vals), -->
+<!--   "SRSWOR benchmark" = as.numeric(srs_vals) -->
+<!-- ) -->
+
+<!-- print( -->
+<!--   xtable( -->
+<!--     vertical_comparison, -->
+<!--     caption = "Realised-sample comparison with the true finite-population mean.", -->
+<!--     label = "tab:srs_benchmark", -->
+<!--     digits = 4, -->
+<!--     align = c("l", "p{5.5cm}", "r", "r") -->
+<!--   ), -->
+<!--   type = "latex", -->
+<!--   comment = FALSE, -->
+<!--   caption.placement = "bottom", -->
+<!--   booktabs = TRUE, -->
+<!--   include.rownames = FALSE, -->
+<!--   table.placement = "!ht" -->
+<!-- ) -->
+
+<!-- #Weights-summary -->
+
+<!-- weight_summary <- selected_sample %>% -->
+<!--   group_by(stratum, settlement_type) %>% -->
+<!--   summarise( -->
+<!--     Population_size = first(Nh), -->
+<!--     Gross_sample = n(), -->
+<!--     Respondents = sum(respondent), -->
+<!--     Inclusion_probability = first(inclusion_probability), -->
+<!--     Base_weight = first(base_weight), -->
+<!--     Final_weight_for_respondents = first(final_weight[respondent == 1]), -->
+<!--     .groups = "drop" -->
+<!--   ) -->
+
+<!-- # Transpose the table so metrics are rows and settlement strata are columns -->
+<!-- #for presentation -->
+<!-- metrics_mat <- as.matrix(weight_summary[, c( -->
+<!--   "Population_size", "Gross_sample", "Respondents",  -->
+<!--   "Inclusion_probability", "Base_weight", "Final_weight_for_respondents" -->
+<!-- )]) -->
+<!-- t_mat <- t(metrics_mat) -->
+<!-- colnames(t_mat) <- weight_summary$settlement_type -->
+
+<!-- weights_vertical <- data.frame( -->
+<!--   Metric = c( -->
+<!--     "Population Size", -->
+<!--     "Gross Sample", -->
+<!--     "Respondents", -->
+<!--     "Inclusion Probability", -->
+<!--     "Base Weight", -->
+<!--     "Final Weight" -->
+<!--   ), -->
+<!--   check.names = FALSE -->
+<!-- ) -->
+<!-- weights_vertical <- cbind(weights_vertical, as.data.frame(t_mat)) -->
+
+<!-- print( -->
+<!--   xtable( -->
+<!--     weights_vertical, -->
+<!--     caption = "Inclusion probabilities and sampling weights by stratum.", -->
+<!--     label = "tab:weights_summary", -->
+<!--     digits = 4, -->
+<!--     align = c("l", "p{4.2cm}", "r", "r", "r", "r") -->
+<!--   ), -->
+<!--   type = "latex", -->
+<!--   comment = FALSE, -->
+<!--   caption.placement = "bottom", -->
+<!--   booktabs = TRUE, -->
+<!--   include.rownames = FALSE, -->
+<!--   table.placement = "!ht" -->
+<!-- ) -->
+
+<!-- #Precision-check -->
+
+<!-- precision_check <- data.frame( -->
+<!--   Design = c("Stratified SRSWOR", "SRSWOR benchmark"), -->
+<!--   Estimated_half_width = c( -->
+<!--     strat_results$CI_half_width, -->
+<!--     srs_results$CI_half_width -->
+<!--   ), -->
+<!--   Required_half_width = target_half_width -->
+<!-- ) %>% -->
+<!--   mutate( -->
+<!--     Meets_target = Estimated_half_width <= Required_half_width -->
+<!--   ) -->
+
+<!-- print( -->
+<!--   xtable( -->
+<!--     precision_check, -->
+<!--     caption = "Assessment of the required confidence-interval half-width.", -->
+<!--     label = "tab:precision_check", -->
+<!--     digits = 4, -->
+<!--     align = c("l", "p{4.5cm}", "r", "r", "c") -->
+<!--   ), -->
+<!--   type = "latex", -->
+<!--   comment = FALSE, -->
+<!--   caption.placement = "bottom", -->
+<!--   booktabs = TRUE, -->
+<!--   include.rownames = FALSE, -->
+<!--   table.placement = "H" -->
+<!-- ) -->
+
+
+<!-- #simulation-functions -->
+<!-- one_stratified_rep <- function(pop, seed) { -->
+<!--   set.seed(seed) -->
+
+<!--   ss <- pop %>% -->
+<!--     group_by(stratum) %>% -->
+<!--     slice_sample(n = gross_n / H, replace = FALSE) %>% -->
+<!--     ungroup() %>% -->
+<!--     mutate(respondent = rbinom(n(), 1, 1 - nonresponse_rate)) -->
+
+<!--   ss_resp <- ss %>% -->
+<!--     filter(respondent == 1) %>% -->
+<!--     group_by(stratum) %>% -->
+<!--     mutate( -->
+<!--       Nh = N_h[first(stratum)], -->
+<!--       final_weight = Nh / n() -->
+<!--     ) %>% -->
+<!--     ungroup() -->
+
+<!--   if (n_distinct(ss_resp$stratum) != H) return(NULL) -->
+
+<!--   des <- svydesign( -->
+<!--     ids = ~1, strata = ~stratum, weights = ~final_weight, -->
+<!--     fpc = ~Nh, data = ss_resp, nest = TRUE -->
+<!--   ) -->
+
+<!--   est <- svymean(~outage_hours, des) -->
+<!--   ci <- as.numeric(confint(est)[1, ]) -->
+
+<!--   data.frame( -->
+<!--     estimate = as.numeric(coef(est)[1]), -->
+<!--     se = as.numeric(SE(est)[1]), -->
+<!--     lower = ci[1], -->
+<!--     upper = ci[2] -->
+<!--   ) -->
+<!-- } -->
+
+<!-- one_srs_rep <- function(pop, seed) { -->
+<!--   set.seed(seed) -->
+
+<!--   ss <- pop %>% -->
+<!--     slice_sample(n = gross_n, replace = FALSE) %>% -->
+<!--     mutate(respondent = rbinom(n(), 1, 1 - nonresponse_rate)) %>% -->
+<!--     filter(respondent == 1) -->
+
+<!--   if (nrow(ss) == 0) return(NULL) -->
+
+<!--   ss <- ss %>% -->
+<!--     mutate( -->
+<!--       N_total = N, -->
+<!--       final_weight = N / nrow(ss) -->
+<!--     ) -->
+
+<!--   des <- svydesign( -->
+<!--     ids = ~1, weights = ~final_weight, -->
+<!--     fpc = ~N_total, data = ss -->
+<!--   ) -->
+
+<!--   est <- svymean(~outage_hours, des) -->
+<!--   ci <- as.numeric(confint(est)[1, ]) -->
+
+<!--   data.frame( -->
+<!--     estimate = as.numeric(coef(est)[1]), -->
+<!--     se = as.numeric(SE(est)[1]), -->
+<!--     lower = ci[1], -->
+<!--     upper = ci[2] -->
+<!--   ) -->
+<!-- } -->
+
+<!-- #Running-simulation -->
+<!-- R <- 1000 -->
+<!-- simulation_seeds <- 50000 + seq_len(R) -->
+
+<!-- strat_sim <- bind_rows(lapply( -->
+<!--   simulation_seeds, -->
+<!--   function(s) { -->
+<!--     ans <- one_stratified_rep(population, s) -->
+<!--     if (is.null(ans)) { -->
+<!--       repeat { -->
+<!--         s <- s + 100000 -->
+<!--         ans <- one_stratified_rep(population, s) -->
+<!--         if (!is.null(ans)) break -->
+<!--       } -->
+<!--     } -->
+<!--     ans -->
+<!--   } -->
+<!-- )) -->
+
+<!-- srs_sim <- bind_rows(lapply( -->
+<!--   simulation_seeds, -->
+<!--   function(s) { -->
+<!--     ans <- one_srs_rep(population, s + 200000) -->
+<!--     if (is.null(ans)) { -->
+<!--       repeat { -->
+<!--         s <- s + 100000 -->
+<!--         ans <- one_srs_rep(population, s + 200000) -->
+<!--         if (!is.null(ans)) break -->
+<!--       } -->
+<!--     } -->
+<!--     ans -->
+<!--   } -->
+<!-- )) -->
+
+<!-- stopifnot(nrow(strat_sim) == R, nrow(srs_sim) == R) -->
+
+<!-- #Simulation-summary -->
+
+<!-- summarise_performance <- function(results, design_name, truth) { -->
+<!--   bias <- mean(results$estimate - truth) -->
+<!--   coverage <- mean(results$lower <= truth & results$upper >= truth) -->
+
+<!--   data.frame( -->
+<!--     Design = design_name, -->
+<!--     Bias = bias, -->
+<!--     Relative_bias_percent = 100 * bias / truth, -->
+<!--     Empirical_SE = sd(results$estimate), -->
+<!--     Average_estimated_SE = mean(results$se), -->
+<!--     RMSE = sqrt(mean((results$estimate - truth)^2)), -->
+<!--     Coverage_percent = 100 * coverage, -->
+<!--     Coverage_MCSE_percent = 100 * sqrt(coverage * (1 - coverage) / nrow(results)), -->
+<!--     Average_CI_width = mean(results$upper - results$lower) -->
+<!--   ) -->
+<!-- } -->
+
+<!-- simulation_summary <- bind_rows( -->
+<!--   summarise_performance(strat_sim, "Stratified SRSWOR", true_mean), -->
+<!--   summarise_performance(srs_sim, "SRSWOR benchmark", true_mean) -->
+<!-- ) -->
+
+<!-- empirical_deff <- var(strat_sim$estimate) / var(srs_sim$estimate) -->
+<!-- simulation_summary$Empirical_DEFF_relative_to_SRS <- c(empirical_deff, 1) -->
+
+<!-- # Transpose into a vertical 3-column format (Metric, Stratified, SRSWOR) -->
+<!-- strat_vals <- unlist(simulation_summary[1, -1]) -->
+<!-- srs_vals <- unlist(simulation_summary[2, -1]) -->
+
+<!-- vertical_sim_summary <- data.frame( -->
+<!--   Metric = c( -->
+<!--     "Bias", -->
+<!--     "Relative Bias (%)", -->
+<!--     "Empirical SE", -->
+<!--     "Average Estimated SE", -->
+<!--     "RMSE", -->
+<!--     "Coverage (%)", -->
+<!--     "Coverage MCSE (%)", -->
+<!--     "Average CI Width", -->
+<!--     "Empirical DEFF (rel. to SRS)" -->
+<!--   ), -->
+<!--   "Stratified SRSWOR" = as.numeric(strat_vals), -->
+<!--   "SRSWOR benchmark" = as.numeric(srs_vals), -->
+<!--   check.names = FALSE -->
+<!-- ) -->
+
+<!-- print( -->
+<!--   xtable( -->
+<!--     vertical_sim_summary, -->
+<!--     caption = "Monte Carlo performance measures based on 1,000 repetitions.", -->
+<!--     label = "tab:sim_summary", -->
+<!--     digits = 4, -->
+<!--     align = c("l", "p{5.5cm}", "r", "r") -->
+<!--   ), -->
+<!--   type = "latex", -->
+<!--   comment = FALSE, -->
+<!--   caption.placement = "bottom", -->
+<!--   booktabs = TRUE, -->
+<!--   include.rownames = FALSE, -->
+<!--   table.placement = "H" -->
+<!-- ) -->
+
+<!-- #simulation-estimate-distributions -->
+<!-- simulation_plot_data <- bind_rows( -->
+<!--   strat_sim %>% mutate(Design = "Stratified SRSWOR"), -->
+<!--   srs_sim %>% mutate(Design = "SRSWOR benchmark") -->
+<!-- ) -->
+
+<!-- ggplot(simulation_plot_data, aes(x = estimate, fill = Design)) + -->
+<!--   geom_density(alpha = 0.35) + -->
+<!--   geom_vline(xintercept = true_mean, linetype = "dashed", linewidth = 0.8) + -->
+<!--   labs( -->
+<!--     x = "Estimated mean monthly outage duration (hours)", -->
+<!--     y = "Density", -->
+<!--     fill = "Sampling design" -->
+<!--   ) + -->
+<!--   theme_minimal(base_size = 11) + -->
+<!--   theme( -->
+<!--     legend.position = "bottom", -->
+<!--     axis.text = element_text(size = 10, face = "bold"), -->
+<!--     axis.title = element_text(size = 11, face = "bold"), -->
+<!--     legend.text = element_text(size = 10), -->
+<!--     legend.title = element_text(size = 10, face = "bold") -->
+<!--   ) -->
+<!-- ``` -->
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
